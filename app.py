@@ -252,11 +252,10 @@ def scan_reddit():
     fetch_cap = min(max_results * 2, 120)
 
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-            " like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        )
+        'User-Agent': 'python:printpulse:v1.0 (by /u/melodicocelot)'
+        # (You can use your actual Reddit username or any unique project name)
     }
+
 
     for sub in subreddits:
         if post_count >= fetch_cap:
