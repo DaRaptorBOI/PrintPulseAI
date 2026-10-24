@@ -1,20 +1,17 @@
 import json
+from datetime import datetime, timezone
 import os
 import xml.etree.ElementTree as ET
-from dotenv import load_dotenv  # Loads variables from your hidden .env file
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template_string, request
 from google import genai
 import requests
 
-# Load local environment variables securely
 load_dotenv()
 
 app = Flask(__name__)
-
-# Safely initialize Gemini using the secure system environment variable
 client = genai.Client()
 
-# Professional SaaS Dashboard HTML Template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -35,20 +32,23 @@ HTML_TEMPLATE = """
                 <p class="text-slate-400 text-sm mt-1">Live AI-powered 3D printing & modeling demand intelligence engine</p>
             </div>
             <div class="flex items-center gap-3">
-                <a href="#pricing" class="bg-slate-900 border border-slate-800 hover:border-cyan-500 text-slate-300 font-semibold px-4 py-2.5 rounded-xl transition text-sm">Upgrade Pro ($19/mo)</a>
+                <span class="bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-semibold px-4 py-2 rounded-xl text-xs uppercase tracking-wider">Public Beta (Free)</span>
                 <button onclick="fetchLiveDemand()" id="scan-btn" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-6 py-3 rounded-xl transition shadow-lg shadow-cyan-500/20 flex items-center gap-2">
                     <span>Scan Live Markets</span>
                 </button>
             </div>
         </header>
 
-        <!-- Controls: Filters & 15 Subreddits -->
+        <!-- Notification Banner for Fallbacks -->
+        <div id="notice-banner" class="hidden bg-amber-500/10 border border-amber-500/30 text-amber-300 px-6 py-4 rounded-2xl mb-6 text-sm font-medium"></div>
+
+        <!-- Controls: Filters, Time Windows, Results Limit & 15 Subreddits -->
         <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl mb-8 flex flex-col gap-6 shadow-xl">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <!-- Keyword Filter -->
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Smart AI Keyword / Topic Filter</label>
-                    <input type="text" id="keywords" placeholder="e.g. dragon, replacement gear, mechanical parts, helmet" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Smart AI Keyword Filter</label>
+                    <input type="text" id="keywords" placeholder="e.g. dragon, gear, helmet" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
                 </div>
                 <!-- Budget Filter -->
                 <div>
@@ -58,47 +58,50 @@ HTML_TEMPLATE = """
                         <option value="paid">Paid / Tipping Only ($ / Commission)</option>
                     </select>
                 </div>
+                <!-- Time Window Filter -->
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Time Window Filter</label>
+                    <select id="time-filter" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
+                        <option value="today">Today (Last 24 Hours)</option>
+                        <option value="3days" selected>Last 3 Days</option>
+                        <option value="week">Last Week</option>
+                        <option value="month">Last Month</option>
+                        <option value="all">Anytime</option>
+                    </select>
+                </div>
+                <!-- Results Limit Filter -->
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Results Limit</label>
+                    <select id="limit-filter" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
+                        <option value="25" selected>25 Items</option>
+                        <option value="50">50 Items</option>
+                        <option value="100">100 Items</option>
+                    </select>
+                </div>
             </div>
 
-            <!-- Subreddit Checkboxes (15 Total) -->
+            <!-- Subreddit Checkboxes -->
             <div>
                 <div class="flex justify-between items-center mb-3">
                     <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Select Subreddits to Scan (15 Communities):</label>
                     <button type="button" onclick="toggleAll(true)" class="text-xs text-cyan-400 hover:underline">Select All</button>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="sub-checkboxes">
-                    <!-- Injected via HTML/JS -->
-                </div>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="sub-checkboxes"></div>
             </div>
         </div>
 
         <!-- Loading Indicator -->
         <div id="loading" class="hidden text-center py-16">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent mb-4"></div>
-            <p class="text-slate-400 font-medium animate-pulse">Scanning 15 live communities & running semantic AI filtering...</p>
+            <p class="text-slate-400 font-medium animate-pulse">Scanning live communities & running semantic AI analysis...</p>
         </div>
 
         <!-- Results Grid -->
         <div id="results-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div class="col-span-full text-center py-16 border-2 border-dashed border-slate-800 rounded-2xl">
-                <p class="text-slate-500 text-lg">Select your target subreddits, set your filters, and click "Scan Live Markets" above!</p>
+                <p class="text-slate-500 text-lg">Select your filters and click "Scan Live Markets" above!</p>
             </div>
         </div>
-
-        <!-- Pricing Section -->
-        <section id="pricing" class="mt-20 pt-12 border-t border-slate-800 text-center">
-            <h2 class="text-2xl font-bold text-white mb-3">Unlock Unlimited Real-Time Gigs</h2>
-            <p class="text-slate-400 text-sm max-w-xl mx-auto mb-8">Get instant desktop alerts the second someone posts a paid 3D design request or custom modeling commission online.</p>
-            <div class="inline-block bg-slate-900 border border-cyan-500/30 p-8 rounded-3xl shadow-2xl">
-                <div class="text-4xl font-extrabold text-cyan-400 mb-2">$19<span class="text-sm font-normal text-slate-400">/month</span></div>
-                <ul class="text-left text-sm text-slate-300 space-y-3 mb-8 mt-6">
-                    <li>✓ Scans all 15+ 3D printing & CAD subreddits</li>
-                    <li>✓ Advanced AI Budget & Commission Detector</li>
-                    <li>✓ Direct Link Click-Throughs to Claim Gigs</li>
-                </ul>
-                <a href="https://buy.stripe.com/test_placeholder" target="_blank" class="block bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-8 py-3.5 rounded-xl transition shadow-lg shadow-cyan-500/20">Upgrade to Pro Now</a>
-            </div>
-        </section>
     </div>
 
     <script>
@@ -126,8 +129,14 @@ HTML_TEMPLATE = """
             const btn = document.getElementById('scan-btn');
             const loading = document.getElementById('loading');
             const grid = document.getElementById('results-grid');
+            const noticeBanner = document.getElementById('notice-banner');
             const keywords = document.getElementById('keywords').value;
             const budgetFilter = document.getElementById('budget-filter').value;
+            const timeFilter = document.getElementById('time-filter').value;
+            const limitFilter = document.getElementById('limit-filter').value;
+
+            noticeBanner.classList.add('hidden');
+            noticeBanner.innerHTML = '';
 
             const selectedSubs = [];
             document.querySelectorAll('input[name="sub"]:checked').forEach(cb => selectedSubs.push(cb.value));
@@ -145,7 +154,13 @@ HTML_TEMPLATE = """
                 const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keywords: keywords, subreddits: selectedSubs, budget_filter: budgetFilter })
+                    body: JSON.stringify({ 
+                        keywords: keywords, 
+                        subreddits: selectedSubs, 
+                        budget_filter: budgetFilter,
+                        time_filter: timeFilter,
+                        limit: limitFilter
+                    })
                 });
 
                 const data = await response.json();
@@ -153,6 +168,10 @@ HTML_TEMPLATE = """
                 btn.disabled = false;
 
                 if (data.status === 'success') {
+                    if (data.fallback_triggered && keywords) {
+                        noticeBanner.classList.remove('hidden');
+                        noticeBanner.innerHTML = `⚠️ We couldn't find anything matching exact keyword "<strong>${keywords}</strong>", but here are other top trending requests instead!`;
+                    }
                     renderCards(data.items);
                 } else {
                     grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Error: ${data.message}</div>`;
@@ -160,14 +179,14 @@ HTML_TEMPLATE = """
             } catch (err) {
                 loading.classList.add('hidden');
                 btn.disabled = false;
-                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Failed to connect to local server.</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Failed to connect to local server or request timed out. Try lowering the limit to 25 or 50.</div>`;
             }
         }
 
         function renderCards(items) {
             const grid = document.getElementById('results-grid');
             if (!items || items.length === 0) {
-                grid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-8">No matching requests found. Try broadening your keywords or filters.</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-8">No requests found matching your filters. Try broadening your criteria!</div>`;
                 return;
             }
 
@@ -214,11 +233,23 @@ def scan_reddit():
     data = request.json or {}
     keywords = data.get("keywords", "").strip()
     budget_filter = data.get("budget_filter", "all")
+    time_filter = data.get("time_filter", "3days")
+    max_results = int(data.get("limit", 25))
     subreddits = data.get("subreddits", ["3Drequests", "3Dprinting"])
 
-    all_posts_text = ""
+    now = datetime.now(timezone.utc)
+    delta_mapping = {
+        "today": 24,
+        "3days": 72,
+        "week": 168,
+        "month": 720,
+        "all": 999999,
+    }
+    delta_hours = delta_mapping.get(time_filter, 72)
+
+    posts_dict = {}
     post_count = 0
-    max_posts = 25
+    fetch_cap = min(max_results * 2, 120)
 
     headers = {
         "User-Agent": (
@@ -228,19 +259,32 @@ def scan_reddit():
     }
 
     for sub in subreddits:
-        if post_count >= max_posts:
+        if post_count >= fetch_cap:
             break
         url = f"https://www.reddit.com/r/{sub}/new.rss"
         try:
-            response = requests.get(url, headers=headers, timeout=4)
+            response = requests.get(url, headers=headers, timeout=3)
             if response.status_code == 200:
                 root = ET.fromstring(response.content)
                 ns = {"atom": "http://www.w3.org/2005/Atom"}
                 entries = root.findall("atom:entry", ns)
 
                 for entry in entries:
-                    if post_count >= max_posts:
+                    if post_count >= fetch_cap:
                         break
+
+                    updated_elem = entry.find("atom:updated", ns)
+                    if updated_ess_elem := updated_elem is not None and updated_elem.text:
+                        try:
+                            post_time = datetime.fromisoformat(
+                                updated_elem.text.replace("Z", "+00:00")
+                            )
+                            age_hours = (now - post_time).total_seconds() / 3600
+                            if age_hours > delta_hours:
+                                continue
+                        except Exception:
+                            pass
+
                     title = (
                         entry.find("atom:title", ns).text
                         if entry.find("atom:title", ns) is not None
@@ -257,13 +301,24 @@ def scan_reddit():
                         author_elem.text if author_elem is not None else "Unknown"
                     )
 
-                    all_posts_text += f"Subreddit: r/{sub}\nAuthor: {author}\nTitle: {title}\nBody: {body}\nLink: {link}\n---\n"
+                    posts_dict[title] = {
+                        "link": link,
+                        "subreddit": f"r/{sub}",
+                        "author": author,
+                    }
                     post_count += 1
         except Exception as e:
             print(f"Skipping r/{sub}: {e}")
 
-    if not all_posts_text:
+    if not posts_dict:
         return jsonify({"status": "success", "items": []})
+
+    all_posts_text = ""
+    for title, info in posts_dict.items():
+        all_posts_text += (
+            f"Subreddit: {info['subreddit']}\nAuthor:"
+            f" {info['author']}\nTitle: {title}\nLink: {info['link']}\n---\n"
+        )
 
     keyword_prompt = (
         f"Focus primarily on requests matching or related to: '{keywords}'."
@@ -285,11 +340,12 @@ def scan_reddit():
         ai_response = client.models.generate_content(
             model="gemini-3.5-flash-lite",
             contents=(
-                "Analyze these live Reddit posts from multiple communities.\n"
+                "Analyze these recent live Reddit posts.\n"
                 f"{keyword_prompt}\n{budget_prompt}\n\n"
-                "Extract up to 15 matching items. Return your response strictly as a JSON array of objects with these exact keys: "
+                f"Extract up to {max_results} matching items. Return your response strictly as a JSON array of objects with these exact keys: "
                 "'model_requested', 'subreddit', 'author', 'category', 'description', 'budget', 'link'. "
-                "If none match strictly, return top closest trending requests so the list is never empty. "
+                "CRITICAL: Match the exact 'Link' provided in the raw text for each post so the URL is correct and clickable. "
+                "If very few or zero posts match the specific keyword strictly, include the next best trending requests to fill the count. "
                 "Do not include any markdown formatting or extra text outside the JSON array.\n\n"
                 f"{all_posts_text}"
             ),
@@ -302,13 +358,37 @@ def scan_reddit():
             clean_text = clean_text[:-3]
 
         parsed_items = json.loads(clean_text.strip())
-        return jsonify({"status": "success", "items": parsed_items})
+
+        for item in parsed_items:
+            title_key = item.get("model_requested", "")
+            if not item.get("link") or item.get("link") == "#":
+                for t, info in posts_dict.items():
+                    if any(word in t.lower() for word in title_key.lower().split()[:2]):
+                        item["link"] = info["link"]
+                        break
+
+        # Check if keyword fallback was likely triggered (if keyword was typed but returned items don't strongly match it)
+        fallback_triggered = False
+        if keywords:
+            keyword_lower = keywords.lower()
+            match_found = any(
+                keyword_lower in item.get("model_requested", "").lower()
+                or keyword_lower in item.get("description", "").lower()
+                for item in parsed_items
+            )
+            if not match_found and len(parsed_items) > 0:
+                fallback_triggered = True
+
+        return jsonify({
+            "status": "success",
+            "items": parsed_items,
+            "fallback_triggered": fallback_triggered,
+        })
     except Exception as e:
         print(f"AI parsing error: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
 
 if __name__ == "__main__":
-    print("Starting PrintPulse AI Production Server...")
-    print("Open your web browser and go to: http://127.0.0.1:5000")
+    print("Starting PrintPulse AI Public Beta Server...")
     app.run(debug=True, port=5000)
