@@ -251,63 +251,68 @@ def scan_reddit():
     post_count = 0
     fetch_cap = min(max_results * 2, 120)
 
+    # Use Multireddit URL format to fetch all selected subreddits in a single request (bypasses rate limits)
+    sub_string = "+".join(subreddits)
+    url = f"https://www.reddit.com/r/{sub_string}/new.rss"
+
     headers = {
-        'User-Agent': 'python:printpulse:v1.0 (by /u/melodicocelot)'
-        # (You can use your actual Reddit username or any unique project name)
+        "User-Agent": "python:printpulse:v1.0 (by /u/printpulse_dev)"
     }
 
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            root = ET.fromstring(response.content)
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            entries = root.findall("atom:entry", ns)
 
-    for sub in subreddits:
-        if post_count >= fetch_cap:
-            break
-        url = f"https://www.reddit.com/r/{sub}/new.rss"
-        try:
-            response = requests.get(url, headers=headers, timeout=3)
-            if response.status_code == 200:
-                root = ET.fromstring(response.content)
-                ns = {"atom": "http://www.w3.org/2005/Atom"}
-                entries = root.findall("atom:entry", ns)
+            for entry in entries:
+                if post_count >= fetch_cap:
+                    break
 
-                for entry in entries:
-                    if post_count >= fetch_cap:
+                updated_elem = entry.find("atom:updated", ns)
+                if updated_elem is not None and updated_elem.text:
+                    try:
+                        post_time = datetime.fromisoformat(
+                            updated_elem.text.replace("Z", "+00:00")
+                        )
+                        age_hours = (now - post_time).total_seconds() / 3600
+                        if age_hours > delta_hours:
+                            continue
+                    except Exception:
+                        pass
+
+                title = (
+                    entry.find("atom:title", ns).text
+                    if entry.find("atom:title", ns) is not None
+                    else ""
+                )
+                summary_elem = entry.find("atom:summary", ns)
+                body = summary_elem.text if summary_elem is not None else ""
+                link_elem = entry.find("atom:link", ns)
+                link = (
+                    link_elem.attrib.get("href", "") if link_elem is not None else ""
+                )
+                author_elem = entry.find("atom:author/atom:name", ns)
+                author = (
+                    author_elem.text if author_elem is not None else "Unknown"
+                )
+
+                # Detect which subreddit this specific post came from
+                sub_source = "Reddit"
+                for sub in subreddits:
+                    if f"/r/{sub}/" in link:
+                        sub_source = f"r/{sub}"
                         break
 
-                    updated_elem = entry.find("atom:updated", ns)
-                    if updated_ess_elem := updated_elem is not None and updated_elem.text:
-                        try:
-                            post_time = datetime.fromisoformat(
-                                updated_elem.text.replace("Z", "+00:00")
-                            )
-                            age_hours = (now - post_time).total_seconds() / 3600
-                            if age_hours > delta_hours:
-                                continue
-                        except Exception:
-                            pass
-
-                    title = (
-                        entry.find("atom:title", ns).text
-                        if entry.find("atom:title", ns) is not None
-                        else ""
-                    )
-                    summary_elem = entry.find("atom:summary", ns)
-                    body = summary_elem.text if summary_elem is not None else ""
-                    link_elem = entry.find("atom:link", ns)
-                    link = (
-                        link_elem.attrib.get("href", "") if link_elem is not None else ""
-                    )
-                    author_elem = entry.find("atom:author/atom:name", ns)
-                    author = (
-                        author_elem.text if author_elem is not None else "Unknown"
-                    )
-
-                    posts_dict[title] = {
-                        "link": link,
-                        "subreddit": f"r/{sub}",
-                        "author": author,
-                    }
-                    post_count += 1
-        except Exception as e:
-            print(f"Skipping r/{sub}: {e}")
+                posts_dict[title] = {
+                    "link": link,
+                    "subreddit": sub_source,
+                    "author": author,
+                }
+                post_count += 1
+    except Exception as e:
+        print(f"Error fetching multireddit feed: {e}")
 
     if not posts_dict:
         return jsonify({"status": "success", "items": []})
@@ -366,7 +371,6 @@ def scan_reddit():
                         item["link"] = info["link"]
                         break
 
-        # Check if keyword fallback was likely triggered (if keyword was typed but returned items don't strongly match it)
         fallback_triggered = False
         if keywords:
             keyword_lower = keywords.lower()
