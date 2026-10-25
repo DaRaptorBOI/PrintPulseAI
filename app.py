@@ -1,8 +1,6 @@
 import json
 from datetime import datetime, timezone
 import os
-import urllib.parse
-import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template_string, request
 from google import genai
@@ -97,7 +95,7 @@ HTML_TEMPLATE = """
         <!-- Loading Indicator -->
         <div id="loading" class="hidden text-center py-16">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent mb-4"></div>
-            <p class="text-slate-400 font-medium animate-pulse">Scanning high-demand communities & running AI analysis...</p>
+            <p class="text-slate-400 font-medium animate-pulse">Scanning live communities via JSON & running AI analysis...</p>
         </div>
 
         <!-- Results Grid -->
@@ -115,7 +113,6 @@ HTML_TEMPLATE = """
             "Blender", "resinprinting", "PrintedMinis", "3Dprintingdeals", "AdditiveManufacturing"
         ];
 
-        // Top demand communities checked by default to keep load times fast
         const defaultSelected = ["3Drequests", "3Dprinting", "functionalprint", "3Dmodeling", "cosplayprops"];
 
         const container = document.getElementById('sub-checkboxes');
@@ -259,71 +256,63 @@ def scan_reddit():
     post_count = 0
     fetch_cap = min(max_results * 2, 80)
 
-    # Fetch subreddits sequentially with short timeout
+    # Custom headers to cleanly identify the open-source tool to Reddit's endpoint
+    headers = {"User-Agent": "PrintPulseAI/1.0 (Educational SaaS Tool)"}
+
     for sub in subreddits:
         if post_count >= fetch_cap:
             break
 
-        target_url = f"https://www.reddit.com/r/{sub}/new.rss"
-        proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
+        json_url = f"https://www.reddit.com/r/{sub}/new.json?limit=25"
 
         try:
-            response = requests.get(proxy_url, timeout=4)
+            response = requests.get(json_url, headers=headers, timeout=5)
             if response.status_code == 200:
-                root = ET.fromstring(response.content)
-                ns = {"atom": "http://www.w3.org/2005/Atom"}
-                entries = root.findall("atom:entry", ns)
+                data_json = response.json()
+                children = data_json.get("data", {}).get("children", [])
 
-                for entry in entries:
+                for child in children:
                     if post_count >= fetch_cap:
                         break
 
-                    updated_elem = entry.find("atom:updated", ns)
-                    if updated_elem is not None and updated_elem.text:
-                        try:
-                            post_time = datetime.fromisoformat(
-                                updated_elem.text.replace("Z", "+00:00")
-                            )
-                            age_hours = (now - post_time).total_seconds() / 3600
-                            if age_hours > delta_hours:
-                                continue
-                        except Exception:
-                            pass
+                    post_data = child.get("data", {})
+                    created_utc = post_data.get("created_utc", 0)
+                    post_time = datetime.fromtimestamp(created_utc, tz=timezone.utc)
+                    age_hours = (now - post_time).total_seconds() / 3600
 
-                    title = (
-                        entry.find("atom:title", ns).text
-                        if entry.find("atom:title", ns) is not None
-                        else ""
-                    )
-                    summary_elem = entry.find("atom:summary", ns)
-                    body = summary_elem.text if summary_elem is not None else ""
-                    link_elem = entry.find("atom:link", ns)
-                    link = (
-                        link_elem.attrib.get("href", "") if link_elem is not None else ""
-                    )
-                    author_elem = entry.find("atom:author/atom:name", ns)
-                    author = (
-                        author_elem.text if author_elem is not None else "Unknown"
-                    )
+                    if age_hours > delta_hours:
+                        continue
 
-                    if title not in posts_dict:
-                        posts_dict[title] = {
+                    title = post_data.get("title", "")
+                    selftext = post_data.get("selftext", "")
+                    permalink = post_data.get("permalink", "")
+                    link = f"https://www.reddit.com{permalink}" if permalink else ""
+                    author = post_data.get("author", "Unknown")
+
+                    body_snippet = selftext[:300] if selftext else ""
+                    combined_text = f"{title} - {body_snippet}"
+
+                    if combined_text not in posts_dict:
+                        posts_dict[combined_text] = {
                             "link": link,
                             "subreddit": f"r/{sub}",
                             "author": author,
+                            "raw_title": title,
+                            "raw_desc": body_snippet,
                         }
                         post_count += 1
         except Exception as e:
-            print(f"Error fetching r/{sub} via proxy: {e}")
+            print(f"Error fetching r/{sub} JSON: {e}")
 
     if not posts_dict:
         return jsonify({"status": "success", "items": []})
 
     all_posts_text = ""
-    for title, info in posts_dict.items():
+    for text_key, info in posts_dict.items():
         all_posts_text += (
             f"Subreddit: {info['subreddit']}\nAuthor:"
-            f" {info['author']}\nTitle: {title}\nLink: {info['link']}\n---\n"
+            f" {info['author']}\nTitle: {info['raw_title']}\nDescription:"
+            f" {info['raw_desc']}\nLink: {info['link']}\n---\n"
         )
 
     keyword_prompt = (
