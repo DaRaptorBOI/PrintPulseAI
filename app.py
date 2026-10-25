@@ -94,7 +94,7 @@ HTML_TEMPLATE = """
         <!-- Loading Indicator -->
         <div id="loading" class="hidden text-center py-16">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent mb-4"></div>
-            <p class="text-slate-400 font-medium animate-pulse">Scanning live communities & running semantic AI analysis...</p>
+            <p class="text-slate-400 font-medium animate-pulse">Scanning live communities sequentially & running semantic AI analysis...</p>
         </div>
 
         <!-- Results Grid -->
@@ -250,24 +250,18 @@ def scan_reddit():
 
     posts_dict = {}
     post_count = 0
-    fetch_cap = min(max_results * 2, 120)
+    fetch_cap = min(max_results * 2, 100)
 
-    # Chunk subreddits into safe groups of 5 so the proxy / Reddit doesn't choke
-    chunk_size = 5
-    subreddit_chunks = [
-        subreddits[i: i + chunk_size]
-        for i in range(0, len(subreddits), chunk_size)
-    ]
-
-    for chunk in subreddit_chunks:
+    # Fetch subreddits one by one individually to prevent proxy timeouts
+    for sub in subreddits:
         if post_count >= fetch_cap:
             break
-        sub_string = "+".join(chunk)
-        target_url = f"https://www.reddit.com/r/{sub_string}/new.rss"
+
+        target_url = f"https://www.reddit.com/r/{sub}/new.rss"
         proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
 
         try:
-            response = requests.get(proxy_url, timeout=6)
+            response = requests.get(proxy_url, timeout=5)
             if response.status_code == 200:
                 root = ET.fromstring(response.content)
                 ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -305,21 +299,15 @@ def scan_reddit():
                         author_elem.text if author_elem is not None else "Unknown"
                     )
 
-                    sub_source = "Reddit"
-                    for sub in chunk:
-                        if f"/r/{sub}/" in link:
-                            sub_source = f"r/{sub}"
-                            break
-
                     if title not in posts_dict:
                         posts_dict[title] = {
                             "link": link,
-                            "subreddit": sub_source,
+                            "subreddit": f"r/{sub}",
                             "author": author,
                         }
                         post_count += 1
         except Exception as e:
-            print(f"Error fetching chunk {chunk}: {e}")
+            print(f"Error fetching r/{sub} via proxy: {e}")
 
     if not posts_dict:
         return jsonify({"status": "success", "items": []})
