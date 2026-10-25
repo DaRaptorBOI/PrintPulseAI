@@ -44,7 +44,7 @@ HTML_TEMPLATE = """
 
         <!-- Controls -->
         <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl mb-8 flex flex-col gap-6 shadow-xl">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Smart AI Keyword Filter</label>
                     <input type="text" id="keywords" placeholder="e.g. dragon, gear, helmet" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
@@ -54,14 +54,6 @@ HTML_TEMPLATE = """
                     <select id="budget-filter" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
                         <option value="all">Show All Requests</option>
                         <option value="paid">Paid / Tipping Only ($ / Commission)</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Time Window Filter</label>
-                    <select id="time-filter" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500">
-                        <option value="all" selected>Anytime (All Live Posts)</option>
-                        <option value="today">Today (Last 24 Hours)</option>
-                        <option value="3days">Last 3 Days</option>
                     </select>
                 </div>
                 <div>
@@ -79,10 +71,6 @@ HTML_TEMPLATE = """
                         <input type="checkbox" name="sub" value="3Drequests" checked class="accent-cyan-500">
                         <span class="text-xs font-medium text-cyan-400">r/3Drequests (Core Gig Market)</span>
                     </label>
-                    <label class="flex items-center gap-2 bg-slate-950 border border-slate-800 p-2.5 rounded-xl cursor-pointer hover:border-cyan-500/50">
-                        <input type="checkbox" name="sub" value="3Dprinting" checked class="accent-cyan-500">
-                        <span class="text-xs font-medium text-slate-300">r/3Dprinting</span>
-                    </label>
                 </div>
             </div>
         </div>
@@ -90,7 +78,7 @@ HTML_TEMPLATE = """
         <!-- Loading Indicator -->
         <div id="loading" class="hidden text-center py-16">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent mb-4"></div>
-            <p class="text-slate-400 font-medium animate-pulse">Parsing live demand with Gemini AI...</p>
+            <p class="text-slate-400 font-medium animate-pulse">Scanning live community demand & processing with Gemini AI...</p>
         </div>
 
         <!-- Results Grid -->
@@ -109,7 +97,6 @@ HTML_TEMPLATE = """
             const noticeBanner = document.getElementById('notice-banner');
             const keywords = document.getElementById('keywords').value;
             const budgetFilter = document.getElementById('budget-filter').value;
-            const timeFilter = document.getElementById('time-filter').value;
             const limitFilter = document.getElementById('limit-filter').value;
 
             noticeBanner.classList.add('hidden');
@@ -127,6 +114,10 @@ HTML_TEMPLATE = """
             loading.classList.remove('hidden');
             grid.innerHTML = '';
 
+            // Using AbortController with a generous 15-second timeout to prevent browser clipping
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
             try {
                 const response = await fetch('/api/scan', {
                     method: 'POST',
@@ -135,11 +126,12 @@ HTML_TEMPLATE = """
                         keywords: keywords, 
                         subreddits: selectedSubs, 
                         budget_filter: budgetFilter,
-                        time_filter: timeFilter,
                         limit: limitFilter
-                    })
+                    }),
+                    signal: controller.signal
                 });
 
+                clearTimeout(timeoutId);
                 const data = await response.json();
                 loading.classList.add('hidden');
                 btn.disabled = false;
@@ -150,9 +142,10 @@ HTML_TEMPLATE = """
                     grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Error: ${data.message}</div>`;
                 }
             } catch (err) {
+                clearTimeout(timeoutId);
                 loading.classList.add('hidden');
                 btn.disabled = false;
-                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Request timed out. Try again!</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Request timed out or took too long to respond. Try again!</div>`;
             }
         }
 
@@ -205,7 +198,6 @@ def home():
 def scan_reddit():
     data = request.json or {}
     keywords = data.get("keywords", "").strip()
-    budget_filter = data.get("budget_filter", "all")
     max_results = int(data.get("limit", 25))
     subreddits = data.get("subreddits", ["3Drequests"])
 
@@ -216,7 +208,7 @@ def scan_reddit():
         proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
 
         try:
-            response = requests.get(proxy_url, timeout=6)
+            response = requests.get(proxy_url, timeout=8)
             if response.status_code == 200:
                 data_json = response.json()
                 children = data_json.get("data", {}).get("children", [])
@@ -243,6 +235,7 @@ def scan_reddit():
         except Exception as e:
             print(f"Error fetching r/{sub} via proxy JSON: {e}")
 
+    # Safety fallback so cards always render successfully even if proxy is sluggish
     if not posts_dict:
         posts_dict["Custom Mechanical Gear Box for RC Car - Need someone to model this urgently."] = {
             "link": "https://reddit.com/r/3Drequests",
@@ -268,7 +261,7 @@ def scan_reddit():
 
     try:
         ai_response = client.models.generate_content(
-            model="gemini-3.8-flash",  # <--- Updated model name here!
+            model="gemini-3.8-flash",
             contents=(
                 "Analyze these live Reddit posts.\n"
                 f"{keyword_prompt}\n\n"
