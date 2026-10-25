@@ -43,7 +43,7 @@ HTML_TEMPLATE = """
         <!-- Notification Banner for Fallbacks -->
         <div id="notice-banner" class="hidden bg-amber-500/10 border border-amber-500/30 text-amber-300 px-6 py-4 rounded-2xl mb-6 text-sm font-medium"></div>
 
-        <!-- Controls: Filters, Time Windows, Results Limit & 15 Subreddits -->
+        <!-- Controls: Filters, Time Windows, Results Limit & Subreddits -->
         <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl mb-8 flex flex-col gap-6 shadow-xl">
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <!-- Keyword Filter -->
@@ -84,8 +84,11 @@ HTML_TEMPLATE = """
             <!-- Subreddit Checkboxes -->
             <div>
                 <div class="flex justify-between items-center mb-3">
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Select Subreddits to Scan (15 Communities):</label>
-                    <button type="button" onclick="toggleAll(true)" class="text-xs text-cyan-400 hover:underline">Select All</button>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Select Subreddits to Scan:</label>
+                    <div class="flex gap-3">
+                        <button type="button" onclick="toggleAll(true)" class="text-xs text-cyan-400 hover:underline">Select All</button>
+                        <button type="button" onclick="toggleAll(false)" class="text-xs text-slate-400 hover:underline">Deselect All</button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="sub-checkboxes"></div>
             </div>
@@ -94,7 +97,7 @@ HTML_TEMPLATE = """
         <!-- Loading Indicator -->
         <div id="loading" class="hidden text-center py-16">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent mb-4"></div>
-            <p class="text-slate-400 font-medium animate-pulse">Scanning live communities sequentially & running semantic AI analysis...</p>
+            <p class="text-slate-400 font-medium animate-pulse">Scanning high-demand communities & running AI analysis...</p>
         </div>
 
         <!-- Results Grid -->
@@ -112,11 +115,15 @@ HTML_TEMPLATE = """
             "Blender", "resinprinting", "PrintedMinis", "3Dprintingdeals", "AdditiveManufacturing"
         ];
 
+        // Top demand communities checked by default to keep load times fast
+        const defaultSelected = ["3Drequests", "3Dprinting", "functionalprint", "3Dmodeling", "cosplayprops"];
+
         const container = document.getElementById('sub-checkboxes');
         subredditsList.forEach(sub => {
+            const isChecked = defaultSelected.includes(sub) ? 'checked' : '';
             container.innerHTML += `
                 <label class="flex items-center gap-2 bg-slate-950 border border-slate-800 p-2.5 rounded-xl cursor-pointer hover:border-cyan-500/50 transition">
-                    <input type="checkbox" name="sub" value="${sub}" checked class="accent-cyan-500">
+                    <input type="checkbox" name="sub" value="${sub}" ${isChecked} class="accent-cyan-500">
                     <span class="text-xs font-medium text-slate-300 truncate">r/${sub}</span>
                 </label>
             `;
@@ -180,7 +187,7 @@ HTML_TEMPLATE = """
             } catch (err) {
                 loading.classList.add('hidden');
                 btn.disabled = false;
-                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Failed to connect to server or request timed out. Try lowering the limit to 25.</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Request timed out. Try scanning fewer subreddits at once!</div>`;
             }
         }
 
@@ -250,9 +257,9 @@ def scan_reddit():
 
     posts_dict = {}
     post_count = 0
-    fetch_cap = min(max_results * 2, 100)
+    fetch_cap = min(max_results * 2, 80)
 
-    # Fetch subreddits one by one individually to prevent proxy timeouts
+    # Fetch subreddits sequentially with short timeout
     for sub in subreddits:
         if post_count >= fetch_cap:
             break
@@ -261,7 +268,7 @@ def scan_reddit():
         proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
 
         try:
-            response = requests.get(proxy_url, timeout=5)
+            response = requests.get(proxy_url, timeout=4)
             if response.status_code == 200:
                 root = ET.fromstring(response.content)
                 ns = {"atom": "http://www.w3.org/2005/Atom"}
