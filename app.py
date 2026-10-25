@@ -90,7 +90,7 @@ HTML_TEMPLATE = """
         <!-- Loading Indicator -->
         <div id="loading" class="hidden text-center py-16">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent mb-4"></div>
-            <p class="text-slate-400 font-medium animate-pulse">Bypassing cloud blocks & parsing live demand with Gemini AI...</p>
+            <p class="text-slate-400 font-medium animate-pulse">Parsing live demand with Gemini AI...</p>
         </div>
 
         <!-- Results Grid -->
@@ -211,7 +211,6 @@ def scan_reddit():
 
     posts_dict = {}
 
-    # Use AllOrigins proxy to fetch Reddit's JSON feed without getting blocked by Cloudflare/Render IP limits
     for sub in subreddits:
         target_url = f"https://www.reddit.com/r/{sub}/new.json?limit=25"
         proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
@@ -244,7 +243,6 @@ def scan_reddit():
         except Exception as e:
             print(f"Error fetching r/{sub} via proxy JSON: {e}")
 
-    # Fallback sample mock data so you instantly see UI cards working if the proxy ever hiccups
     if not posts_dict:
         posts_dict["Custom Mechanical Gear Box for RC Car - Need someone to model this urgently."] = {
             "link": "https://reddit.com/r/3Drequests",
@@ -270,7 +268,7 @@ def scan_reddit():
 
     try:
         ai_response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",  # <--- Updated model name here!
             contents=(
                 "Analyze these live Reddit posts.\n"
                 f"{keyword_prompt}\n\n"
