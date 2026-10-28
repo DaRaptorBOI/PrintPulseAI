@@ -39,9 +39,6 @@ HTML_TEMPLATE = """
             </div>
         </header>
 
-        <!-- Notification Banner -->
-        <div id="notice-banner" class="hidden bg-amber-500/10 border border-amber-500/30 text-amber-300 px-6 py-4 rounded-2xl mb-6 text-sm font-medium"></div>
-
         <!-- Controls -->
         <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl mb-8 flex flex-col gap-6 shadow-xl">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -98,13 +95,9 @@ HTML_TEMPLATE = """
             const btn = document.getElementById('scan-btn');
             const loading = document.getElementById('loading');
             const grid = document.getElementById('results-grid');
-            const noticeBanner = document.getElementById('notice-banner');
             const keywords = document.getElementById('keywords').value;
             const budgetFilter = document.getElementById('budget-filter').value;
             const limitFilter = document.getElementById('limit-filter').value;
-
-            noticeBanner.classList.add('hidden');
-            noticeBanner.innerHTML = '';
 
             const selectedSubs = [];
             document.querySelectorAll('input[name="sub"]:checked').forEach(cb => selectedSubs.push(cb.value));
@@ -148,14 +141,14 @@ HTML_TEMPLATE = """
                 clearTimeout(timeoutId);
                 loading.classList.add('hidden');
                 btn.disabled = false;
-                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Request timed out or took too long to respond. Try again!</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Request timed out. Try again!</div>`;
             }
         }
 
         function renderCards(items) {
             const grid = document.getElementById('results-grid');
             if (!items || items.length === 0) {
-                grid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-8">No requests found matching your filters. Try clearing keywords!</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-8">No requests found. Try clearing keywords!</div>`;
                 return;
             }
 
@@ -252,7 +245,10 @@ def scan_reddit():
     keyword_prompt = (
         f"Focus primarily on requests matching: '{keywords}'."
         if keywords
-        else "Extract all custom 3D printing and modeling requests."
+        else (
+            "Extract all recent 3D printing topics, questions, and requests found"
+            " in the text."
+        )
     )
 
     try:
