@@ -261,7 +261,7 @@ def scan_reddit():
 
     try:
         ai_response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-2.5-flash-lite",
             contents=(
                 "Analyze these live Reddit posts.\n"
                 f"{keyword_prompt}\n\n"
